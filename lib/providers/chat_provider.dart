@@ -164,18 +164,9 @@ class ChatProvider extends ChangeNotifier {
       final response = await http.get(Uri.parse('$_baseUrl/sessions/$id'));
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final historyList = data['history'] as List?;
         
-        // Đôi khi backend lưu history dưới dạng chuỗi JSON trong MySQL, ta cần parse lại
-        var historyData = data['history'];
-        if (historyData is String) {
-          try {
-            historyData = jsonDecode(historyData);
-          } catch (_) {}
-        }
-        
-        final historyList = historyData as List?;
-        
-        if (historyList != null && historyList.isNotEmpty) {
+        if (historyList != null) {
           for (var item in historyList) {
             final role = item['role'];
             final content = item['content'] ?? '';
@@ -213,29 +204,11 @@ class ChatProvider extends ChangeNotifier {
               analysisData: analysisData,
             ));
           }
-        } else {
-          // Lịch sử trống hoặc null
-          _messages.add(ChatMessage(
-            id: 'empty',
-            text: 'Server trả về lịch sử trống cho phiên này.',
-            isUser: false,
-          ));
         }
         _updateUrlWithSession(id);
-      } else {
-        _messages.add(ChatMessage(
-          id: 'error',
-          text: 'Không thể tải lịch sử (Lỗi ${response.statusCode}): ${response.body}',
-          isUser: false,
-        ));
       }
     } catch (e) {
       print("Lỗi tải lịch sử từ Server: $e");
-      _messages.add(ChatMessage(
-        id: 'error_exception',
-        text: 'Đã xảy ra lỗi kết nối hoặc xử lý dữ liệu: $e',
-        isUser: false,
-      ));
     }
     await saveHistory(); // Đảm bảo lưu vào Sidebar History ở Local
     notifyListeners();
