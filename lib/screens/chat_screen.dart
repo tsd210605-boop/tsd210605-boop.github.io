@@ -6,7 +6,8 @@ import '../providers/chat_provider.dart';
 import 'voice_screen.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final String? sessionId;
+  const ChatScreen({super.key, this.sessionId});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -17,13 +18,27 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  @override
+  void initState() {
+    super.initState();
+    if (widget.sessionId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<ChatProvider>().loadSessionFromServer(widget.sessionId!);
+      });
+    }
+  }
+
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      try {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      } catch (e) {
+        // Bỏ qua lỗi tính toán vị trí cuộn trên Web
+      }
     }
   }
 
@@ -34,8 +49,11 @@ class _ChatScreenState extends State<ChatScreen> {
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: _buildAppBar(),
       endDrawer: _buildHistoryDrawer(),
-      body: Column(
-        children: [
+      body: Listener(
+        onPointerHover: (_) => context.read<ChatProvider>().clearBadge(),
+        onPointerDown: (_) => context.read<ChatProvider>().clearBadge(),
+        child: Column(
+          children: [
           Expanded(
             child: Consumer<ChatProvider>(
               builder: (context, chatProvider, child) {
@@ -48,11 +66,22 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: chatProvider.messages.length + (chatProvider.isTyping ? 1 : 0),
                   itemBuilder: (context, index) {
                     if (index == chatProvider.messages.length && chatProvider.isTyping) {
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
                         child: Align(
                           alignment: Alignment.centerLeft,
-                          child: Text("AI đang suy nghĩ...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              const SizedBox(width: 8),
+                              Text("AI đang suy nghĩ...", style: TextStyle(color: Colors.grey.shade600, fontStyle: FontStyle.italic)),
+                            ],
+                          ),
                         ),
                       );
                     }
@@ -71,7 +100,8 @@ class _ChatScreenState extends State<ChatScreen> {
           _buildInputBar(context),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildMessageItem(ChatMessage msg) {
@@ -549,15 +579,56 @@ class _ChatScreenState extends State<ChatScreen> {
             IconButton(
               icon: const Icon(Icons.camera_alt_outlined),
               color: Colors.grey.shade600,
-              onPressed: () async {
-                final picker = ImagePicker();
-                final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-                if (pickedFile != null) {
-                  final bytes = await pickedFile.readAsBytes();
-                  if (context.mounted) {
-                    context.read<ChatProvider>().sendImage(bytes, pickedFile.name);
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  builder: (BuildContext bottomSheetContext) {
+                    return SafeArea(
+                      child: Wrap(
+                        children: <Widget>[
+                          ListTile(
+                            leading: const Icon(Icons.camera_alt),
+                            title: const Text('Chụp ảnh trực tiếp'),
+                            onTap: () async {
+                              final picker = ImagePicker();
+                              final pickedFile = await picker.pickImage(source: ImageSource.camera);
+                              
+                              if (bottomSheetContext.mounted) {
+                                Navigator.of(bottomSheetContext).pop();
+                              }
+                              
+                              if (pickedFile != null) {
+                                final bytes = await pickedFile.readAsBytes();
+                                if (context.mounted) {
+                                  context.read<ChatProvider>().sendImage(bytes, pickedFile.name);
+                                }
+                              }
+                            },
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.photo_library),
+                            title: const Text('Chọn ảnh từ thư viện'),
+                            onTap: () async {
+                              final picker = ImagePicker();
+                              final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                              
+                              if (bottomSheetContext.mounted) {
+                                Navigator.of(bottomSheetContext).pop();
+                              }
+                              
+                              if (pickedFile != null) {
+                                final bytes = await pickedFile.readAsBytes();
+                                if (context.mounted) {
+                                  context.read<ChatProvider>().sendImage(bytes, pickedFile.name);
+                                }
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    );
                   }
-                }
+                );
               },
             ),
             Expanded(

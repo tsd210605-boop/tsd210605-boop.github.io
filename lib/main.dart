@@ -34,7 +34,18 @@ class TaxMateApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const ChatScreen(),
+      initialRoute: '/',
+      onGenerateRoute: (settings) {
+        if (settings.name != null && settings.name!.startsWith('/chat/')) {
+          final sessionId = settings.name!.replaceFirst('/chat/', '');
+          return MaterialPageRoute(
+            builder: (context) => ChatScreen(sessionId: sessionId),
+          );
+        }
+        return MaterialPageRoute(
+          builder: (context) => const ChatScreen(),
+        );
+      },
     );
   }
 }

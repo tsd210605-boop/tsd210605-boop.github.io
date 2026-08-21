@@ -5,6 +5,9 @@ import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
+import 'package:universal_html/html.dart' as html;
+import 'package:flutter_app_badger/flutter_app_badger.dart';
 import '../models/chat_message.dart';
 import '../models/chat_session.dart';
 
@@ -16,6 +19,7 @@ class ChatProvider extends ChangeNotifier {
 
   // Voice State
   final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioPlayer _notificationPlayer = AudioPlayer();
   final stt.SpeechToText _speechToText = stt.SpeechToText();
   bool _isListening = false;
   String _spokenText = '';
@@ -40,6 +44,52 @@ class ChatProvider extends ChangeNotifier {
       _history = decoded.map((i) => ChatSession.fromJson(i as Map<String, dynamic>)).toList();
       notifyListeners();
     }
+  }
+
+  void clearBadge() {
+    if (kIsWeb) {
+      html.document.title = 'TaxMate AI';
+      _updateFavicon('favicon.png', 'image/png');
+    } else {
+      FlutterAppBadger.removeBadge();
+    }
+  }
+
+  void setBadge() {
+    if (kIsWeb) {
+      html.document.title = '(1) Tin nhắn mới - TaxMate AI';
+      final String svgRedDot = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iI2ZmMDAwMCIvPjx0ZXh0IHg9IjUwIiB5PSI3MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjYwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPjE8L3RleHQ+PC9zdmc+';
+      _updateFavicon(svgRedDot, 'image/svg+xml');
+    } else {
+      try {
+        FlutterAppBadger.updateBadgeCount(1);
+      } catch (e) {
+        print("Badger error: $e");
+      }
+    }
+    _playNotificationSound();
+  }
+
+  void _playNotificationSound() async {
+    try {
+      await _notificationPlayer.play(AssetSource('sounds/notification.mp3'));
+    } catch (e) {
+      print("Cannot play notification: $e");
+    }
+  }
+
+  void _updateFavicon(String url, String type) {
+    // Xóa toàn bộ các thẻ favicon cũ để trình duyệt không bị cache hoặc nhầm lẫn
+    var oldLinks = html.document.querySelectorAll("link[rel*='icon']");
+    for (var oldLink in oldLinks) {
+      oldLink.remove();
+    }
+    // Tạo mới hoàn toàn thẻ favicon và nhúng vào head
+    var newLink = html.LinkElement()
+      ..rel = 'icon'
+      ..type = type
+      ..href = url;
+    html.document.head?.append(newLink);
   }
 
   Future<void> saveHistory() async {
@@ -85,6 +135,7 @@ class ChatProvider extends ChangeNotifier {
     _messages.clear();
     _messages.addAll(session.messages);
     _sessionId = session.sessionId;
+    _updateUrlWithSession(id);
     notifyListeners();
   }
 
@@ -92,7 +143,87 @@ class ChatProvider extends ChangeNotifier {
     await saveHistory();
     _messages.clear();
     _sessionId = null;
+    if (kIsWeb) {
+      html.window.history.pushState(null, 'TaxMate AI', '/#/');
+    }
     notifyListeners();
+  }
+
+  void _updateUrlWithSession(String sessionId) {
+    if (kIsWeb) {
+      html.window.history.pushState(null, 'TaxMate AI', '/#/chat/$sessionId');
+    }
+  }
+
+  Future<void> loadSessionFromServer(String id) async {
+    _sessionId = id;
+    _messages.clear();
+    notifyListeners();
+    
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/sessions/$id'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final historyList = data['history'] as List?;
+        
+        if (historyList != null) {
+          for (var item in historyList) {
+            final role = item['role'];
+            final content = item['content'] ?? '';
+            final isUser = role == 'user';
+            
+            // Nếu content rỗng hoặc là ảnh, tạo bong bóng ảnh (tạm mô phỏng)
+            final isImage = isUser && content.contains('[Uploaded Image]');
+            
+            _messages.add(ChatMessage(
+              id: DateTime.now().microsecondsSinceEpoch.toString(),
+              text: isImage ? 'Ảnh đã tải lên' : content,
+              isUser: isUser,
+              isImage: isImage,
+              isAnalysis: !isUser && data.containsKey('filled_slots'), // Giả lập
+            ));
+          }
+        }
+        _updateUrlWithSession(id);
+      }
+    } catch (e) {
+      print("Lỗi tải lịch sử từ Server: $e");
+    }
+    await saveHistory(); // Đảm bảo lưu vào Sidebar History ở Local
+    notifyListeners();
+  }
+
+  Future<void> _ensureSessionId() async {
+    if (_sessionId == null || _sessionId!.startsWith('local_')) {
+      final sessionRes = await http.post(
+        Uri.parse('$_baseUrl/sessions'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'workflow_code': 'PHAN_TICH_HOA_DON'}),
+      ).timeout(const Duration(seconds: 10));
+      
+      if (sessionRes.statusCode == 200) {
+        final sData = jsonDecode(utf8.decode(sessionRes.bodyBytes));
+        
+        if (_sessionId != null && _sessionId!.startsWith('local_')) {
+          final oldIdx = _history.indexWhere((s) => s.sessionId == _sessionId);
+          if (oldIdx >= 0) {
+            final oldSession = _history[oldIdx];
+            _history[oldIdx] = ChatSession(
+              sessionId: sData['session_id'],
+              title: oldSession.title,
+              messages: oldSession.messages,
+              updatedAt: oldSession.updatedAt,
+            );
+          }
+        }
+        
+        _sessionId = sData['session_id'];
+        _updateUrlWithSession(_sessionId!);
+        saveHistory();
+      } else {
+        throw Exception("Không thể tạo Session");
+      }
+    }
   }
 
   void _initStt() async {
@@ -196,37 +327,7 @@ class ChatProvider extends ChangeNotifier {
     saveHistory();
 
     try {
-      // 1. Nếu chưa có session_id thật từ server thì gọi /sessions để khởi tạo
-      if (_sessionId == null || _sessionId!.startsWith('local_')) {
-        final sessionRes = await http.post(
-          Uri.parse('$_baseUrl/sessions'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'workflow_code': 'PHAN_TICH_HOA_DON'}),
-        ).timeout(const Duration(seconds: 10));
-        
-        if (sessionRes.statusCode == 200) {
-          final sData = jsonDecode(utf8.decode(sessionRes.bodyBytes));
-          
-          // Nếu trước đó đang dùng local ID, cập nhật lại lịch sử với ID thật
-          if (_sessionId != null && _sessionId!.startsWith('local_')) {
-            final oldIdx = _history.indexWhere((s) => s.sessionId == _sessionId);
-            if (oldIdx >= 0) {
-              final oldSession = _history[oldIdx];
-              _history[oldIdx] = ChatSession(
-                sessionId: sData['session_id'],
-                title: oldSession.title,
-                messages: oldSession.messages,
-                updatedAt: oldSession.updatedAt,
-              );
-            }
-          }
-          
-          _sessionId = sData['session_id'];
-          saveHistory(); // Lưu lại ID mới
-        } else {
-          throw Exception("Không thể tạo Session");
-        }
-      }
+      await _ensureSessionId();
 
       // 2. Gửi file ảnh dạng Base64 vào API /vision-chat
       final base64Image = base64Encode(imageBytes);
@@ -257,6 +358,7 @@ class ChatProvider extends ChangeNotifier {
           analysisData: data,
         );
         _messages.add(aiMsg);
+        setBadge();
       } else {
         final aiMsg = ChatMessage(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -284,11 +386,15 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Đổi sang gọi API /ask (Hỏi đáp tự do RAG) thay vì bị kẹt trong luồng Khai Thuế
+      await _ensureSessionId();
+
+      // Gọi /chat/ thay vì /ask hoặc gửi kèm session_id nếu API yêu cầu
+      // Tạm thời mình gửi kèm session_id vào /ask (hoặc tuỳ Server của bạn)
       final response = await http.post(
         Uri.parse('$_baseUrl/ask'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
+          'session_id': _sessionId, // Thêm session_id để Server lưu lịch sử
           'question': userText
         }),
       ).timeout(const Duration(minutes: 5));
@@ -307,6 +413,7 @@ class ChatProvider extends ChangeNotifier {
           isUser: false,
         );
         _messages.add(aiMsg);
+        setBadge();
       } else {
         final aiMsg = ChatMessage(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
