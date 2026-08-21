@@ -175,12 +175,33 @@ class ChatProvider extends ChangeNotifier {
             // Nếu content rỗng hoặc là ảnh, tạo bong bóng ảnh (tạm mô phỏng)
             final isImage = isUser && content.contains('[Uploaded Image]');
             
+            // Chỉ những tin nhắn AI có chứa "AI PHÂN TÍCH HÓA ĐƠN" mới được coi là kết quả phân tích
+            final isAnalysisMsg = !isUser && data.containsKey('filled_slots') && content.contains('AI PHÂN TÍCH HÓA ĐƠN');
+            
+            // Xử lý dữ liệu hóa đơn (nếu có) để truyền vào giao diện
+            Map<String, dynamic>? analysisData;
+            if (isAnalysisMsg) {
+              final invoiceData = data['filled_slots']['invoice_data'];
+              if (invoiceData != null) {
+                analysisData = {
+                  'date': invoiceData['ngay_lap_hoa_don'] ?? invoiceData['ngay'] ?? '',
+                  'seller': invoiceData['ten_ben_ban'] ?? invoiceData['ben_ban'] ?? '',
+                  'total': invoiceData['tong_tien_thanh_toan'] ?? invoiceData['tong_cong'] ?? '',
+                  'tax': invoiceData['tien_thue_gtgt'] ?? invoiceData['thue_gtgt'] ?? '',
+                  'steps': invoiceData['buoc_tiep_theo'] ?? ['Kiểm tra lại số liệu trước khi kê khai'],
+                };
+              } else {
+                analysisData = data['filled_slots'];
+              }
+            }
+            
             _messages.add(ChatMessage(
               id: DateTime.now().microsecondsSinceEpoch.toString(),
               text: isImage ? 'Ảnh đã tải lên' : content,
               isUser: isUser,
               isImage: isImage,
-              isAnalysis: !isUser && data.containsKey('filled_slots'), // Giả lập
+              isAnalysis: isAnalysisMsg,
+              analysisData: analysisData,
             ));
           }
         }
