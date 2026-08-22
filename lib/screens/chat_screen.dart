@@ -60,38 +60,40 @@ class _ChatScreenState extends State<ChatScreen> {
                 // Auto scroll when new messages arrive
                 WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
                 
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-                  itemCount: chatProvider.messages.length + (chatProvider.isTyping ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == chatProvider.messages.length && chatProvider.isTyping) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                              const SizedBox(width: 8),
-                              Text("AI đang suy nghĩ...", style: TextStyle(color: Colors.grey.shade600, fontStyle: FontStyle.italic)),
-                            ],
+                return SelectionArea(
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                    itemCount: chatProvider.messages.length + (chatProvider.isTyping ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == chatProvider.messages.length && chatProvider.isTyping) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                                const SizedBox(width: 8),
+                                Text("AI đang suy nghĩ...", style: TextStyle(color: Colors.grey.shade600, fontStyle: FontStyle.italic)),
+                              ],
+                            ),
                           ),
-                        ),
+                        );
+                      }
+                      
+                      final msg = chatProvider.messages[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 16.0),
+                        child: _buildMessageItem(msg),
                       );
-                    }
-                    
-                    final msg = chatProvider.messages[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: _buildMessageItem(msg),
-                    );
-                  },
+                    },
+                  ),
                 );
               },
             ),
